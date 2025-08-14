@@ -529,25 +529,25 @@ async function startBot() {
                     console.log(`📍 Lokasi diterima dari: ${id_grup_pemain}`);
 
                     const recPengguna = await getDataRowQuery({
-                            columns: ['pengguna.no_hp', 'pengguna.id_grup_pemain', 'pengguna.id_pemain', 'pemain.nama_pemain'],
+                            columns: ['pengguna.no_hp', 'pengguna.id_grup_pemain', 'pemain.id_pemain', 'pengguna.nama_pengguna'],
                             from: 'pengguna',
                             joins: [{ table: 'pemain', on: 'pengguna.id_pemain = pemain.id_pemain'}],
                             filters: {'pengguna.id_grup_pemain =': id_grup_pemain},
-                            orderBy: 'pemain.nama_pemain DESC'
+                            orderBy: 'pengguna.nama_pengguna DESC'
                     });
-
+                    
                 } else {
 
                     const no_hp = senderNumber;
                     console.log(`📍 Lokasi diterima dari: ${no_hp}`);
 
                     const recPengguna = await getDataRowQuery({
-                            columns: ['pengguna.no_hp', 'pengguna.id_pemain', 'pemain.nama_pemain'],
+                            columns: ['pengguna.no_hp', 'pemain.id_pemain', 'pengguna.nama_pengguna'],
                             from: 'pengguna',
                             joins: [{ table: 'pemain', on: 'pengguna.id_pemain = pemain.id_pemain'}],
                             filters: {'pengguna.no_hp =': no_hp},
-                            orderBy: 'pemain.nama_pemain DESC'
-                    });
+                            orderBy: 'pengguna.nama_pengguna DESC'
+                    });  
 
                 }
                 
