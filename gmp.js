@@ -1,4 +1,4 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, isJidGroup } = require("@whiskeysockets/baileys");
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, isJidGroup, NO_MESSAGE_FOUND_ERROR_TEXT } = require("@whiskeysockets/baileys");
 const { Session } = require("inspector/promises");
 const fs = require("fs");
 const { error } = require("console");
@@ -40,6 +40,7 @@ const GMP_PROFIL_PEMAIN = `buat profil pemain`;
 const GMP_TENTUKAN_POOL = `buat pool`;
 const GMP_REKAP_PRESENSI = `buat rekap presensi`;
 const GMP_REGISTRASI = `registrasi ulang`;
+const GMP_BEREGUDUO = `bereguduo`;
 
 const perintahAll = [GMP_REKAP_PRESENSI, GMP_INFOGRAFIS_RANGKING_PEMAIN, GMP_RANGKING_PEMAIN, GMP_HEAD_TO_HEAD, GMP_HEAD_TO_HEAD2, GMP_DISP_TURNAMEN, GMP_DISP_PEMAIN, GMP_POSISI_TERBAIK, GMP_DAFTARKAN, GMP_DAFTARKAN_SAYA, GMP_PROFIL_PEMAIN, GMP_RENCANA_TURNAMEN, GMP_TENTUKAN_POOL, GMP_REGISTRASI, 'tambah', 'hapus', 'perbaiki', 'perbaiki status', 'perbaiki realisasi'];
 
@@ -231,6 +232,36 @@ function Syarat(jumlah){
      {
         return "TMS";
      }
+}
+
+function pasanganDuo(data) {
+  // Urutkan berdasarkan ranking_sebelum
+  const sorted = [...data].sort((a, b) => a.rangking_sebelum - b.rangking_sebelum);
+
+  // Buat array pasangan manual sesuai kebutuhan
+  const result = [];
+
+  // Pasangan dengan pola: ambil head & tail (1–last, 2–(last-1), dst)
+  let left = 0;
+  let right = sorted.length - 1;
+  while (left < right) {
+    result.push({
+      nama_pasangan: `${sorted[left].nama_pemain} (${sorted[left].ranking_sebelum})/${sorted[right].nama_pemain} (${sorted[right].ranking_sebelum})`,
+      ranking_sekarang: result.length + 1
+    });
+    left++;
+    right--;
+  }
+
+  // Kalau ganjil, sisakan satu pemain
+  if (left === right) {
+    result.push({
+      nama_pasangan: `${sorted[left].nama_pemain} (${sorted[left].ranking_sebelum}) _tanpa pasangan_`,
+      ranking_sekarang: result.length + 1
+    });
+  }
+
+  return result;
 }
 
 async function startBot() {
@@ -557,7 +588,7 @@ async function startBot() {
                 if (!recPengguna.success) return;
                  
                 const id_pemain = recPengguna.data[0].id_pemain;
-                const nama_pemain = recPengguna.data[0].nama_pemain;
+                const nama_pemain = recPengguna.data[0].nama_pengguna;
 
                 // Bila Pemain Melakukan forward
                 if (isForwarded) {
@@ -1081,11 +1112,22 @@ async function startBot() {
                 }
 
                 console.log(recPengguna.data);
+                console.log(command);
 
                 if (recPengguna.success) {
                     let id_pemain = recPengguna.data[0].id_pemain;
-                    let alias = command.parameter[0]; 
-                    const nama_pemain = recPengguna.data[0].nama_pemain;
+                    let alias = command.parameter[0];
+                    console.log(`ID Pemain: ${id_pemain}, Alias: ${alias}`); 
+                    let MIN_PRESENSI = 3;
+                    const nama_pemain = recPengguna.data[0].nama_pengguna;
+
+                    const menu_bereguduo = alias.toLowerCase();
+                    console.log(recPengguna.data[0], menu_bereguduo);
+                    // Bila Pemain Mendaftar Beregu Duo
+                    if (menu_bereguduo===GMP_BEREGUDUO) {
+                        alias = `Kedelapan`;
+                        MIN_PRESENSI = 1;
+                    }
 
                     // Dapatkan id_turnamen pada tabel turnamen
                     const recTur = await getDataRow('*', 'turnamen', {'alias': alias});
@@ -1153,11 +1195,13 @@ async function startBot() {
                     });
 
                     if (!recPresensi.success){
-                        await sock.sendMessage(senderJid, { text: `_Presensi *${nama_pemain}* tidak ditemukan._` }); 
+                        await sock.sendMessage(senderJid, { text: `_*${nama_pemain}* belum pernah presensi._` }); 
                         return;
                     }
                 
-                    if (recPresensi.data[0].jumlah_hadir>=3) {
+                    if (recPresensi.data[0].jumlah_hadir>=MIN_PRESENSI) {
+
+                        if (menu_bereguduo===GMP_BEREGUDUO) id_turnamen=202513;
                         // Simpan
                         const data = {'id_pemain': id_pemain, 'id_turnamen': id_turnamen, 'ranking_sebelum': peringkat, 'pool': pool, 'tgl_daftar': tgl_daftar};
                         console.log(data);
@@ -1189,6 +1233,42 @@ async function startBot() {
                             orderBy: 'daftar.ranking_sebelum'
                         });
                    
+                        // Proses Pembagian Pool
+                        if (menu_bereguduo===GMP_BEREGUDUO) {
+                                if (recDaftar1.success) {
+                                    //const grup = Math.ceil(recDaftar1.data.length / 3);
+                                    //console.log(grup);
+
+                                    // Proses Mengurutkan Data Pool
+                                    const dataPemain = [];
+                                    recDaftar1.data.forEach ((item, index) => {
+                                        dataPemain[index] = {'nu': (index+1), 'id_pemain': item.id_pemain, 'nama_pemain': item.nama_pemain, 'ranking_sebelum': item.ranking_sebelum};
+                                    }); 
+
+                                    // Urutkan data Pemain
+                                    console.log(dataPemain);
+                                    const pasangan = pasanganDuo(dataPemain);
+                                    console.log(pasangan);
+                                    //console.log(pasangan.length);
+                                    const grp = Math.ceil(pasangan.length / 3);
+
+                                    const lstPemain = pasangan.map((item, index) => ({
+                                    nama_pasangan: item.nama_pasangan,
+                                    ranking_sekarang: item.ranking_sekarang,
+                                    pool: getPool(grp, index + 1)
+                                    })).sort((a, b) => a.pool.localeCompare(b.pool));
+
+
+                                    let strDaftar = `DAFTAR PESERTA TURNAMEN\n${recDaftar1.data[0].nama_turnamen}\nTanggal : ${DateToStr(recDaftar1.data[0].tgl_realisasi)}\n\n*No. Nama Pasangan        Pool*\n`;
+                                        
+                                    lstPemain.forEach ((item, index) => {
+                                        strDaftar += `${String((index+1)).padStart(3, ' ')}. ${String(item.nama_pasangan).padEnd(30,' ')} *${item.pool}*\n`;
+                                    });
+                                await sock.sendMessage(senderJid, { text: strDaftar });
+                                if (grp>=2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+
+                                }
+                        } else {
                         if (recDaftar1.success) {
                             const grup = Math.ceil(recDaftar1.data.length / 3);
                             console.log(grup);
@@ -1214,9 +1294,9 @@ async function startBot() {
                                     if (item.ranking_sebelum===99) ranking_prev=0; else ranking_prev=item.ranking_sebelum;
                                     strDaftar += `${String((index+1)).padStart(3, ' ')}. ${item.nama_pemain} #${String(item.nu)}/${String(ranking_prev)} *${item.pool}*\n`;
                                 });
-                                
-                                await sock.sendMessage(senderJid, { text: strDaftar });
-                                if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+                            }
+                            await sock.sendMessage(senderJid, { text: strDaftar });
+                            if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
                         }
                     } else {
                         await sock.sendMessage(senderJid, { text: `_Presensi *${recPresensi.data[0].nama_pemain}* berjumlah ${recPresensi.data[0].jumlah_hadir}, jadi *belum memenuhi syarat*._`});
