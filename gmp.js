@@ -1,4 +1,16 @@
-const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, isJidGroup, NO_MESSAGE_FOUND_ERROR_TEXT } = require("@whiskeysockets/baileys");
+const makeWASocket = require('@whiskeysockets/baileys').default;
+const {
+  useMultiFileAuthState,
+  isJidGroup, 
+  NO_MESSAGE_FOUND_ERROR_TEXT,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  makeCacheableSignalKeyStore,
+  jidNormalizedUser
+} = require('@whiskeysockets/baileys');
+const pino = require('pino');
+const qrcode = require('qrcode-terminal');
+
 const { Session } = require("inspector/promises");
 const fs = require("fs");
 const { error } = require("console");
@@ -8,7 +20,6 @@ const { isPointInPolygon} = require('geolib');
 const locations = require('./locations.json');
 const { sign } = require("crypto");
 require("dotenv").config();
-const qrcode = require('qrcode-terminal');
 
 const path = 'parameters.json';
 const IDAPPSTART = '1';;
@@ -267,30 +278,47 @@ function pasanganDuo(data) {
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("./auth_multi_device"); 
 
+    // Ambil versi WA Web terbaru agar kompatibel
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`Using WA Web v${version.join('.')} (latest: ${isLatest})`);
+
     const sock = makeWASocket({
-        auth: state,
-        //printQRInTerminal: true,
-        syncFullHistory: true,
+        version,
+        logger: pino({ level: 'info' }),
+        printQRInTerminal: true, // auto cetak QR di terminal
+        auth: {
+        creds: state.creds,
+        keys: makeCacheableSignalKeyStore(state.keys, pino({ level: 'silent' }))
+        },
+        // opsi tambahan:
+        syncFullHistory: false,
+        markOnlineOnConnect: true,
+        browser: ['WABot MD', 'Chrome', '1.0.0']
+    });
+
+      // Cetak QR manual (opsional) kalau mau tampilkan custom
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect, qr } = update;
+        if (qr) {
+        console.log('Scan QR di WhatsApp (Linked devices):');
+        qrcode.generate(qr, { small: true });
+        }
+        if (connection === 'open') {
+        console.log('Wot WhatsApp terhubung!');
+        } else if (connection === 'close') {
+        const shouldReconnect =
+            (lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+        console.log('❌ Koneksi terputus:', lastDisconnect?.error?.message);
+        if (shouldReconnect) {
+            console.log('🔄 Mencoba tersambung ulang...');
+            startBot(); // reconnect
+        } else {
+            console.log('🚪 Keluar (logged out). Hapus folder ./auth untuk login ulang.');
+        }
+        }
     });
 
     sock.ev.on("creds.update", saveCreds);
-
-    sock.ev.on("connection.update", (update) => {
-        const { connection, lastDisconnect, qr } = update;
-
-     // ✅ Jika QR code muncul, tampilkan di terminal
-    if (qr) {
-      console.log('[📱] Silakan scan QR berikut ini dengan WhatsApp Anda:');
-      qrcode.generate(qr, { small: true });
-    }
-        if (connection === "close") {
-            const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-            console.log("Koneksi terputus, mencoba menyambung ulang:", shouldReconnect);
-            if (shouldReconnect) startBot();
-        } else if (connection === "open") {
-            console.log("Bot WhatsApp terhubung!");
-        }
-    });
 
     sock.ev.on("messages.upsert", async (m) => {
         if (!m.messages[0]?.message) return;
