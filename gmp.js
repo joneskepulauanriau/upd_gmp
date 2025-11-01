@@ -52,6 +52,7 @@ const GMP_TENTUKAN_POOL = `buat pool`;
 const GMP_REKAP_PRESENSI = `buat rekap presensi`;
 const GMP_REGISTRASI = `registrasi ulang`;
 const GMP_BEREGUDUO = `bereguduo`;
+const GMP_GANDA = `ganda`;
 
 const perintahAll = [GMP_REKAP_PRESENSI, GMP_INFOGRAFIS_RANGKING_PEMAIN, GMP_RANGKING_PEMAIN, GMP_HEAD_TO_HEAD, GMP_HEAD_TO_HEAD2, GMP_DISP_TURNAMEN, GMP_DISP_PEMAIN, GMP_POSISI_TERBAIK, GMP_DAFTARKAN, GMP_DAFTARKAN_SAYA, GMP_PROFIL_PEMAIN, GMP_RENCANA_TURNAMEN, GMP_TENTUKAN_POOL, GMP_REGISTRASI, 'tambah', 'hapus', 'perbaiki', 'perbaiki status', 'perbaiki realisasi'];
 
@@ -1156,6 +1157,10 @@ async function startBot() {
                         alias = `Kedelapan`;
                         MIN_PRESENSI = 1;
                     }
+                    if (menu_bereguduo===GMP_GANDA) {
+                        alias = `Kesebelas`;
+                        MIN_PRESENSI = 0;
+                    }
 
                     // Dapatkan id_turnamen pada tabel turnamen
                     const recTur = await getDataRow('*', 'turnamen', {'alias': alias});
@@ -1205,129 +1210,201 @@ async function startBot() {
                     
                     // Simpan data
                     let tgl_daftar = new Date;
+        
+                    console.log(`Menu ----> ${menu_bereguduo}, ID Turnamen: ${id_turnamen}, ID Pemain: ${id_pemain}, Peringkat: ${peringkat}, Pool: ${pool}`);
+                    if (menu_bereguduo===GMP_GANDA) {
+                        id_turnamen=202514;
 
-                    // Cek Apakah Presensi sudah 3x
-                    const filter = {'presensi.id_pemain =': id_pemain, 'presensi.id_turnamen =': id_turnamen};
-                    const recPresensi = await getDataRowQuery({
-                        columns: [`presensi.id_pemain`, `presensi.id_turnamen`, `presensi.id_pemain`, `presensi.id_turnamen`,
-                            `presensi.tgl_presensi`, `presensi.waktu_presensi`, `presensi.longitude`, `presensi.latitude`,
-                            `presensi.area`, `pemain.nama_pemain`, `turnamen.nama_turnamen`, `turnamen.alias`, `turnamen.tgl_turnamen`,
-                            `turnamen.tgl_realisasi`, `turnamen.tahun`, `count(1) AS jumlah_hadir`, `turnamen.priode_jadwal_mulai`,
-                            `turnamen.priode_jadwal_selesai`, `turnamen.jadwal_presensi`],
-                        from: 'presensi',
-                        joins: [{ table: 'pemain', on: 'presensi.id_pemain = pemain.id_pemain'},
-                                { table: 'turnamen', on: 'presensi.id_turnamen = turnamen.id_turnamen'}],
-                        filters: filter,
-                        groupBy: 'presensi.id_pemain, presensi.id_turnamen, turnamen.tahun',
-                        orderBy: 'presensi.id_pemain'
-                    });
+                            // Simpan
+                            const data = {'id_pemain': id_pemain, 'id_turnamen': id_turnamen, 'ranking_sebelum': peringkat, 'pool': pool, 'tgl_daftar': tgl_daftar};
+                            console.log(data);
+                            const recDaftar = await insertData('daftar', data);
+                            
+                            await sock.sendMessage(senderJid, { text: recDaftar.message });
 
-                    if (!recPresensi.success){
-                        await sock.sendMessage(senderJid, { text: `_*${nama_pemain}* belum pernah presensi._` }); 
-                        return;
-                    }
-                
-                    if (recPresensi.data[0].jumlah_hadir>=MIN_PRESENSI) {
+                            // Tampilkan Data 
+                            const recDaftar1 =  await getDataRowQuery({
+                                columns: [
+                                'daftar.id_pemain',
+                                'pemain.nama_pemain',
+                                'daftar.id_turnamen',
+                                'turnamen.nama_turnamen',
+                                'turnamen.alias',
+                                'turnamen.tgl_turnamen',
+                                'turnamen.tgl_realisasi',
+                                'turnamen.status',
+                                'daftar.ranking_sebelum',
+                                'daftar.pool',
+                                'daftar.tgl_daftar'
+                                ],
+                                from: 'daftar',
+                                joins: [
+                                { table: 'pemain', on: 'daftar.id_pemain = pemain.id_pemain' },
+                                { table: 'turnamen', on: 'daftar.id_turnamen = turnamen.id_turnamen' }
+                                ],
+                                filters: {'turnamen.id_turnamen =': id_turnamen},
+                                orderBy: 'daftar.ranking_sebelum'
+                            });
+                    
+                            if (recDaftar1.success) {
+                                        //const grup = Math.ceil(recDaftar1.data.length / 3);
+                                        //console.log(grup);
 
-                        if (menu_bereguduo===GMP_BEREGUDUO) id_turnamen=202513;
-                        // Simpan
-                        const data = {'id_pemain': id_pemain, 'id_turnamen': id_turnamen, 'ranking_sebelum': peringkat, 'pool': pool, 'tgl_daftar': tgl_daftar};
-                        console.log(data);
-                        const recDaftar = await insertData('daftar', data);
-                        
-                        await sock.sendMessage(senderJid, { text: recDaftar.message });
+                                        // Proses Mengurutkan Data Pool
+                                const dataPemain = [];
+                                recDaftar1.data.forEach ((item, index) => {
+                                            dataPemain[index] = {'nu': (index+1), 'id_pemain': item.id_pemain, 'nama_pemain': item.nama_pemain, 'ranking_sebelum': item.ranking_sebelum};
+                                }); 
 
-                        // Tampilkan Data 
-                        const recDaftar1 =  await getDataRowQuery({
-                            columns: [
-                            'daftar.id_pemain',
-                            'pemain.nama_pemain',
-                            'daftar.id_turnamen',
-                            'turnamen.nama_turnamen',
-                            'turnamen.alias',
-                            'turnamen.tgl_turnamen',
-                            'turnamen.tgl_realisasi',
-                            'turnamen.status',
-                            'daftar.ranking_sebelum',
-                            'daftar.pool',
-                            'daftar.tgl_daftar'
-                            ],
-                            from: 'daftar',
-                            joins: [
-                            { table: 'pemain', on: 'daftar.id_pemain = pemain.id_pemain' },
-                            { table: 'turnamen', on: 'daftar.id_turnamen = turnamen.id_turnamen' }
-                            ],
-                            filters: {'turnamen.id_turnamen =': id_turnamen},
-                            orderBy: 'daftar.ranking_sebelum'
-                        });
-                   
-                        // Proses Pembagian Pool
-                        if (menu_bereguduo===GMP_BEREGUDUO) {
-                                if (recDaftar1.success) {
-                                    //const grup = Math.ceil(recDaftar1.data.length / 3);
-                                    //console.log(grup);
+                                // Urutkan data Pemain
+                                console.log(dataPemain);
+                                const pasangan = pasanganDuo(dataPemain);
+                                console.log(pasangan);
+                                //console.log(pasangan.length);
+                                const grp = Math.ceil(pasangan.length / 3);
 
-                                    // Proses Mengurutkan Data Pool
-                                    const dataPemain = [];
-                                    recDaftar1.data.forEach ((item, index) => {
-                                        dataPemain[index] = {'nu': (index+1), 'id_pemain': item.id_pemain, 'nama_pemain': item.nama_pemain, 'ranking_sebelum': item.ranking_sebelum};
-                                    }); 
-
-                                    // Urutkan data Pemain
-                                    console.log(dataPemain);
-                                    const pasangan = pasanganDuo(dataPemain);
-                                    console.log(pasangan);
-                                    //console.log(pasangan.length);
-                                    const grp = Math.ceil(pasangan.length / 3);
-
-                                    const lstPemain = pasangan.map((item, index) => ({
-                                    nama_pasangan: item.nama_pasangan,
-                                    ranking_sekarang: item.ranking_sekarang,
-                                    pool: getPool(grp, index + 1)
-                                    })).sort((a, b) => a.pool.localeCompare(b.pool));
+                                const lstPemain = pasangan.map((item, index) => ({
+                                nama_pasangan: item.nama_pasangan,
+                                ranking_sekarang: item.ranking_sekarang,
+                                pool: getPool(grp, index + 1)
+                                })).sort((a, b) => a.pool.localeCompare(b.pool));
 
 
-                                    let strDaftar = `DAFTAR PESERTA TURNAMEN\n${recDaftar1.data[0].nama_turnamen}\nTanggal : ${DateToStr(recDaftar1.data[0].tgl_realisasi)}\n\n*No. Nama Pasangan        Pool*\n`;
-                                        
-                                    lstPemain.forEach ((item, index) => {
+                                let strDaftar = `DAFTAR PESERTA TURNAMEN\n${recDaftar1.data[0].nama_turnamen}\nTanggal : ${DateToStr(recDaftar1.data[0].tgl_realisasi)}\n\n*No. Nama Pasangan        Pool*\n`;
+                                            
+                                lstPemain.forEach ((item, index) => {
                                         strDaftar += `${String((index+1)).padStart(3, ' ')}. ${String(item.nama_pasangan).padEnd(30,' ')} *${item.pool}*\n`;
-                                    });
+                                });
                                 await sock.sendMessage(senderJid, { text: strDaftar });
                                 if (grp>=2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
 
-                                }
-                        } else {
-                        if (recDaftar1.success) {
-                            const grup = Math.ceil(recDaftar1.data.length / 3);
-                            console.log(grup);
-
-                            let strDaftar = `DAFTAR PESERTA TURNAMEN\n${recDaftar1.data[0].nama_turnamen}\nTanggal : ${DateToStr(recDaftar1.data[0].tgl_realisasi)}\n\n*No. Nama Peserta  #B/L  Pool*\n`;
                                 
-                                // Proses Mengurutkan Data Pool
-                                const dataPool = [];
-                                recDaftar1.data.forEach ((item, index) => {
-                                    dataPool[index] = {'nu': (index+1), 'nama_pemain': item.nama_pemain, 'ranking_sebelum': item.ranking_sebelum, 'pool': getPool(grup, (index+1))}
-                                });
+                            } 
+                    }
+                    else {
+                        // Cek Apakah Presensi sudah 3x
+                        const filter = {'presensi.id_pemain =': id_pemain, 'presensi.id_turnamen =': id_turnamen};
+                        const recPresensi = await getDataRowQuery({
+                            columns: [`presensi.id_pemain`, `presensi.id_turnamen`, `presensi.id_pemain`, `presensi.id_turnamen`,
+                                `presensi.tgl_presensi`, `presensi.waktu_presensi`, `presensi.longitude`, `presensi.latitude`,
+                                `presensi.area`, `pemain.nama_pemain`, `turnamen.nama_turnamen`, `turnamen.alias`, `turnamen.tgl_turnamen`,
+                                `turnamen.tgl_realisasi`, `turnamen.tahun`, `count(1) AS jumlah_hadir`, `turnamen.priode_jadwal_mulai`,
+                                `turnamen.priode_jadwal_selesai`, `turnamen.jadwal_presensi`],
+                            from: 'presensi',
+                            joins: [{ table: 'pemain', on: 'presensi.id_pemain = pemain.id_pemain'},
+                                    { table: 'turnamen', on: 'presensi.id_turnamen = turnamen.id_turnamen'}],
+                            filters: filter,
+                            groupBy: 'presensi.id_pemain, presensi.id_turnamen, turnamen.tahun',
+                            orderBy: 'presensi.id_pemain'
+                        });
 
-                                // Urutkan
-                                const sortDaftar = [...dataPool].sort((a, b) => {
-                                    if (a.pool === b.pool) {
-                                        return a.ranking_sebelum - b.ranking_sebelum; // urut poin jika pool sama
-                                    }
-                                    return a.pool.localeCompare(b.pool); // urut pool
-                                });
-
-                                let ranking_prev = 0;
-                                sortDaftar.forEach ((item, index) => {
-                                    if (item.ranking_sebelum===99) ranking_prev=0; else ranking_prev=item.ranking_sebelum;
-                                    strDaftar += `${String((index+1)).padStart(3, ' ')}. ${item.nama_pemain} #${String(item.nu)}/${String(ranking_prev)} *${item.pool}*\n`;
-                                });
-                            }
-                            await sock.sendMessage(senderJid, { text: strDaftar });
-                            if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+                        if (!recPresensi.success){
+                            await sock.sendMessage(senderJid, { text: `_*${nama_pemain}* belum pernah presensi._` }); 
+                            return;
                         }
-                    } else {
-                        await sock.sendMessage(senderJid, { text: `_Presensi *${recPresensi.data[0].nama_pemain}* berjumlah ${recPresensi.data[0].jumlah_hadir}, jadi *belum memenuhi syarat*._`});
+                    
+                        if (recPresensi.data[0].jumlah_hadir>=MIN_PRESENSI) {
+
+                            if (menu_bereguduo===GMP_BEREGUDUO) id_turnamen=202513;
+                            // Simpan
+                            const data = {'id_pemain': id_pemain, 'id_turnamen': id_turnamen, 'ranking_sebelum': peringkat, 'pool': pool, 'tgl_daftar': tgl_daftar};
+                            console.log(data);
+                            const recDaftar = await insertData('daftar', data);
+                            
+                            await sock.sendMessage(senderJid, { text: recDaftar.message });
+
+                            // Tampilkan Data 
+                            const recDaftar1 =  await getDataRowQuery({
+                                columns: [
+                                'daftar.id_pemain',
+                                'pemain.nama_pemain',
+                                'daftar.id_turnamen',
+                                'turnamen.nama_turnamen',
+                                'turnamen.alias',
+                                'turnamen.tgl_turnamen',
+                                'turnamen.tgl_realisasi',
+                                'turnamen.status',
+                                'daftar.ranking_sebelum',
+                                'daftar.pool',
+                                'daftar.tgl_daftar'
+                                ],
+                                from: 'daftar',
+                                joins: [
+                                { table: 'pemain', on: 'daftar.id_pemain = pemain.id_pemain' },
+                                { table: 'turnamen', on: 'daftar.id_turnamen = turnamen.id_turnamen' }
+                                ],
+                                filters: {'turnamen.id_turnamen =': id_turnamen},
+                                orderBy: 'daftar.ranking_sebelum'
+                            });
+                    
+                            // Proses Pembagian Pool
+                            if (menu_bereguduo===GMP_BEREGUDUO) {
+                                    if (recDaftar1.success) {
+                                        //const grup = Math.ceil(recDaftar1.data.length / 3);
+                                        //console.log(grup);
+
+                                        // Proses Mengurutkan Data Pool
+                                        const dataPemain = [];
+                                        recDaftar1.data.forEach ((item, index) => {
+                                            dataPemain[index] = {'nu': (index+1), 'id_pemain': item.id_pemain, 'nama_pemain': item.nama_pemain, 'ranking_sebelum': item.ranking_sebelum};
+                                        }); 
+
+                                        // Urutkan data Pemain
+                                        console.log(dataPemain);
+                                        const pasangan = pasanganDuo(dataPemain);
+                                        console.log(pasangan);
+                                        //console.log(pasangan.length);
+                                        const grp = Math.ceil(pasangan.length / 3);
+
+                                        const lstPemain = pasangan.map((item, index) => ({
+                                        nama_pasangan: item.nama_pasangan,
+                                        ranking_sekarang: item.ranking_sekarang,
+                                        pool: getPool(grp, index + 1)
+                                        })).sort((a, b) => a.pool.localeCompare(b.pool));
+
+
+                                        let strDaftar = `DAFTAR PESERTA TURNAMEN\n${recDaftar1.data[0].nama_turnamen}\nTanggal : ${DateToStr(recDaftar1.data[0].tgl_realisasi)}\n\n*No. Nama Pasangan        Pool*\n`;
+                                            
+                                        lstPemain.forEach ((item, index) => {
+                                            strDaftar += `${String((index+1)).padStart(3, ' ')}. ${String(item.nama_pasangan).padEnd(30,' ')} *${item.pool}*\n`;
+                                        });
+                                    await sock.sendMessage(senderJid, { text: strDaftar });
+                                    if (grp>=2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+
+                                    }
+                            } else {
+                            if (recDaftar1.success) {
+                                const grup = Math.ceil(recDaftar1.data.length / 3);
+                                console.log(grup);
+
+                                let strDaftar = `DAFTAR PESERTA TURNAMEN\n${recDaftar1.data[0].nama_turnamen}\nTanggal : ${DateToStr(recDaftar1.data[0].tgl_realisasi)}\n\n*No. Nama Peserta  #B/L  Pool*\n`;
+                                    
+                                    // Proses Mengurutkan Data Pool
+                                    const dataPool = [];
+                                    recDaftar1.data.forEach ((item, index) => {
+                                        dataPool[index] = {'nu': (index+1), 'nama_pemain': item.nama_pemain, 'ranking_sebelum': item.ranking_sebelum, 'pool': getPool(grup, (index+1))}
+                                    });
+
+                                    // Urutkan
+                                    const sortDaftar = [...dataPool].sort((a, b) => {
+                                        if (a.pool === b.pool) {
+                                            return a.ranking_sebelum - b.ranking_sebelum; // urut poin jika pool sama
+                                        }
+                                        return a.pool.localeCompare(b.pool); // urut pool
+                                    });
+
+                                    let ranking_prev = 0;
+                                    sortDaftar.forEach ((item, index) => {
+                                        if (item.ranking_sebelum===99) ranking_prev=0; else ranking_prev=item.ranking_sebelum;
+                                        strDaftar += `${String((index+1)).padStart(3, ' ')}. ${item.nama_pemain} #${String(item.nu)}/${String(ranking_prev)} *${item.pool}*\n`;
+                                    });
+                                }
+                                await sock.sendMessage(senderJid, { text: strDaftar });
+                                if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+                            }
+                        } else {
+                            await sock.sendMessage(senderJid, { text: `_Presensi *${recPresensi.data[0].nama_pemain}* berjumlah ${recPresensi.data[0].jumlah_hadir}, jadi *belum memenuhi syarat*._`});
+                        }
                     }
                 } else {
                     await sock.sendMessage(senderJid, { text: recPengguna.message });
