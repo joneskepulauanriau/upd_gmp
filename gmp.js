@@ -1158,7 +1158,7 @@ async function startBot() {
                         MIN_PRESENSI = 1;
                     }
                     if (menu_bereguduo===GMP_GANDA) {
-                        alias = `Kesebelas`;
+                        alias = `Keduabelas`;
                         MIN_PRESENSI = 0;
                     }
 
