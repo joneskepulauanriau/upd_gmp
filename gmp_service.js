@@ -575,13 +575,28 @@ async function resetAutoincrement(settings) {
 async function getPeringkat(idTurnamen) {
   const modul = 'getPeringkat';
   const connection = await getConnection();
-
+  const tahun = Math.floor(idTurnamen / 100); // 2026
+  
   try {
     // Ambil daftar turnamen yang lebih kecil atau sama dengan idTurnamen
+    
+    /*
     const [turnamen] = await connection.execute(
       `SELECT DISTINCT id_turnamen FROM peringkat WHERE id_turnamen <= ? ORDER BY id_turnamen`,
       [idTurnamen]
     );
+   */
+
+const [turnamen] = await connection.execute(
+  `
+  SELECT DISTINCT id_turnamen
+  FROM peringkat
+  WHERE id_turnamen BETWEEN ? AND ?
+  ORDER BY id_turnamen
+  `,
+  [tahun * 100 + 1, tahun * 100 + 12]
+);
+
     const daftarTurnamen = turnamen.map((t) => t.id_turnamen);
 
     //console.log("Daftar Turnamen yang Diambil:", daftarTurnamen);
