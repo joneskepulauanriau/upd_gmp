@@ -242,7 +242,7 @@ async function generateImage2(recParam, senderNumber) {
   const rowHeight = 25;
   const rowHeightHeader = 220;
   const canvasWidth = 794;
-  const canvasHeight = 1300;
+  const canvasHeight = 1400;
 
   const canvas = createCanvas(canvasWidth, canvasHeight);
   const ctx = canvas.getContext('2d');
@@ -323,8 +323,8 @@ async function generateImage2(recParam, senderNumber) {
 async function generateImageReport({ data, columns, title, subtitle = '', periode = '', output = 'laporan.png' }) {
     var rowHeightHeader = 220;
     const rowHeight = 25;
-  const canvasWidth = 794;
-  const canvasHeight = 1123;
+  const canvasWidth = 1080;//794;
+  const canvasHeight = 1920;//1123;
 
   const canvas = createCanvas(canvasWidth, canvasHeight);
   const ctx = canvas.getContext('2d');
@@ -509,6 +509,13 @@ function parseCommand(text) {
     .replace(/[;,\.]/g, ' ')                     // Ganti ; , . jadi spasi
     .replace(/h2h|pertemuan langsung/gi, 'head to head')
     .replace(/\btampilkan\b/gi, 'buat')
+    .replace(/\bberegu duo\b/gi, 'bereguduo')
+    .replace(/\bcek poin reward\b/gi, 'reward')
+    .replace(/\bcek poin\b/gi, 'reward')
+    .replace(/\bcek reward\b/gi, 'reward')
+    .replace(/\bdaftar poin reward\b/gi, 'listreward')
+    .replace(/\bdaftar poin\b/gi, 'listreward')
+    .replace(/\bdaftar reward\b/gi, 'listreward')
     .replace(/\brangking\b|\bperingkat\b/gi, 'ranking')
     .replace(/\btahap\b|\bperiode\b|\bpriode\b|\bperbaikan peringkat\b/gi, '')
     .replace(/\butnuk\b|\buntk\b|\bntuk\b|\btuk\b|\butk\b/gi, 'untuk')
@@ -526,6 +533,17 @@ function parseCommand(text) {
     .replace(/\b(ke[-\s]?10|ke10|ke[-\s]?sepuluh|kesepuluh|sepuluh)\b/gi, 'kesepuluh')
     .replace(/\b(ke[-\s]?11|ke11|ke[-\s]?sebelas|kesebelas|ke sebelas|sebelas)\b/gi, 'kesebelas')
     .replace(/\b(ke[-\s]?12|ke12|ke[-\s]?dua belas|ke dua belas|kedua belas|dua belas)\b/gi, 'keduabelas')
+    .replace(/\b(ke[-\s]?13|ke13|ke[-\s]?tiga belas|ke tiga belas|ketiga belas|tiga belas)\b/gi, 'ketigabelas')
+    .replace(/\b(ke[-\s]?14|ke14|ke[-\s]?empat belas|ke empat belas|keempat belas|empat belas)\b/gi, 'keempatbelas')
+    .replace(/\b(ke[-\s]?15|ke15|ke[-\s]?lima belas|ke lima belas|kelima belas|lima belas)\b/gi, 'kelimabelas')
+    .replace(/\b(ke[-\s]?16|ke16|ke[-\s]?enam belas|ke enam belas|keenam belas|enam belas)\b/gi, 'keenambelas')
+    .replace(/\b(ke[-\s]?17|ke17|ke[-\s]?tujuh belas|ke tujuh belas|ketujuh belas|tujuh belas)\b/gi, 'ketujuhbelas')
+    .replace(/\b(ke[-\s]?18|ke18|ke[-\s]?delapan belas|ke delapan belas|kedelapan belas|delapan belas)\b/gi, 'kedelapanbelas')
+    .replace(/\b(ke[-\s]?19|ke19|ke[-\s]?sembilan belas|ke sembilan belas|kesembilan belas|sembilan belas)\b/gi, 'kesembilanbelas')
+    .replace(/\b(ke[-\s]?20|ke20|ke[-\s]?dua puluh|ke dua puluh|kedua puluh|kedua puluh)\b/gi, 'keduapuluh')
+    .replace(/\b(ke[-\s]?21|ke21|ke[-\s]?dua puluh satu|ke dua puluh satu|kedua puluh satu|dua puluh satu)\b/gi, 'keduapuluhsatu')
+    .replace(/\b(ke[-\s]?22|ke22|ke[-\s]?dua puluh dua|ke dua puluh dua|kedua puluh dua|dua puluh dua)\b/gi, 'keduapuluhdua')
+    .replace(/\b(ke[-\s]?23|ke23|ke[-\s]?dua puluh tiga|ke dua puluh tiga|kedua puluh tiga|dua puluh tiga)\b/gi, 'keduapuluhtiga')
 
     .trim();
 

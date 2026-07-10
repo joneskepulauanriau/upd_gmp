@@ -4,15 +4,20 @@ const {
   isJidGroup, 
   NO_MESSAGE_FOUND_ERROR_TEXT,
   DisconnectReason,
+  downloadMediaMessage,
   fetchLatestBaileysVersion,
   makeCacheableSignalKeyStore,
   jidNormalizedUser
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
+const sharp = require('sharp');
+const { createWorker } = require("tesseract.js");
 
 const { Session } = require("inspector/promises");
 const fs = require("fs");
+const fsq = require("fs/promises");
+
 const { error } = require("console");
 const {getDataRow, getDataRowQuery, insertData, updateData, deleteData, getPeringkat, findHeadToHead, resetAutoincrement, getIDPlayer, getPosisiTerbaik } = require('./src/model/gmp_service');
 const { handleFile, readFileExcel, generateImage, generateImage2, DateToWIB, parseCommand, parsePerintah, isNumber, generateImageReport, DateTimeIndonesia, getDayNameFromDate} = require('./src/model/gmp_function');
@@ -20,6 +25,15 @@ const { isPointInPolygon} = require('geolib');
 const locations = require('./locations.json');
 const { sign } = require("crypto");
 require("dotenv").config();
+
+const VALID_ID = "024303044";
+const SAVE_DEBUG_OCR = true;
+
+const logger = pino({
+  level: "silent"
+});
+
+let ocrWorker = null;
 
 const path = 'parameters.json';
 const IDAPPSTART = '1';;
@@ -53,8 +67,10 @@ const GMP_REKAP_PRESENSI = `buat rekap presensi`;
 const GMP_REGISTRASI = `registrasi ulang`;
 const GMP_BEREGUDUO = `bereguduo`;
 const GMP_GANDA = `ganda`;
+const GMP_REWARD = `reward`;
+const GMP_LIST_REWARD = `listreward`;
 
-const perintahAll = [GMP_REKAP_PRESENSI, GMP_INFOGRAFIS_RANGKING_PEMAIN, GMP_RANGKING_PEMAIN, GMP_HEAD_TO_HEAD, GMP_HEAD_TO_HEAD2, GMP_DISP_TURNAMEN, GMP_DISP_PEMAIN, GMP_POSISI_TERBAIK, GMP_DAFTARKAN, GMP_DAFTARKAN_SAYA, GMP_PROFIL_PEMAIN, GMP_RENCANA_TURNAMEN, GMP_TENTUKAN_POOL, GMP_REGISTRASI, 'tambah', 'hapus', 'perbaiki', 'perbaiki status', 'perbaiki realisasi'];
+const perintahAll = [GMP_LIST_REWARD, GMP_REKAP_PRESENSI, GMP_INFOGRAFIS_RANGKING_PEMAIN, GMP_RANGKING_PEMAIN, GMP_HEAD_TO_HEAD, GMP_HEAD_TO_HEAD2, GMP_DISP_TURNAMEN, GMP_DISP_PEMAIN, GMP_POSISI_TERBAIK, GMP_DAFTARKAN, GMP_DAFTARKAN_SAYA, GMP_PROFIL_PEMAIN, GMP_RENCANA_TURNAMEN, GMP_TENTUKAN_POOL, GMP_REGISTRASI, 'tambah', 'hapus', 'perbaiki', 'perbaiki status', 'perbaiki realisasi'];
 
 const GMP_MULAI_IMPORT_DATA = `mulai import data`; 
 const GMP_RESET_PERTANDINGAN = `reset pertandingan`;
@@ -275,6 +291,471 @@ function pasanganDuo(data) {
 
   return result;
 }
+
+/**************************
+ * Transfer QRIS
+ * 
+ */
+
+async function getOcrWorker() {
+  if (!ocrWorker) {
+    ocrWorker = await createWorker("eng");
+  }
+
+  return ocrWorker;
+}
+
+function normalizeText(text = "") {
+  return text
+    .replace(/\r/g, "\n")
+    .replace(/[|]/g, "I")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function normalizeDigits(text = "") {
+  return text.replace(/[^\d]/g, "");
+}
+
+function splitLines(text = "") {
+  return text
+    .split(/\r?\n/)
+    .map(line => line.replace(/\s+/g, " ").trim())
+    .filter(Boolean);
+}
+
+/**
+ * Fungsi validasi ID transfer.
+ *
+ * ID 024303044 harus ditulis sebagai string,
+ * karena angka 0 di depan dapat hilang jika ditulis sebagai number.
+ *
+ * Contoh benar:
+ * CheckIDTransfer("024303044", ocrText)
+ */
+function CheckIDTransfer(idTransfer, text = "") {
+  const id = String(idTransfer);
+  const cleanText = normalizeText(text);
+  const digitsOnly = normalizeDigits(text);
+
+  return cleanText.includes(id) || digitsOnly.includes(id);
+}
+
+function findValueByLabel(text = "", labelRegex) {
+  const lines = splitLines(text);
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (labelRegex.test(line)) {
+      const parts = line.split(/[:：]/);
+
+      if (parts.length > 1) {
+        const value = parts.slice(1).join(":").trim();
+
+        if (value) {
+          return value;
+        }
+      }
+
+      const afterLabel = line
+        .replace(labelRegex, "")
+        .replace(/^[:：\-\s]+/, "")
+        .trim();
+
+      if (afterLabel) {
+        return afterLabel;
+      }
+
+      if (lines[i + 1]) {
+        return lines[i + 1].trim();
+      }
+    }
+  }
+
+  return "";
+}
+
+function extractRefId(text = "") {
+  const raw = normalizeText(text);
+
+  const fromLabel = findValueByLabel(
+    text,
+    /(?:ref(?:erence)?\s*id|ref\.?\s*id|no\.?\s*ref(?:erensi)?|nomor\s*referensi|id\s*transaksi|nomor\s*transaksi|transaction\s*id|rrn|stan)/i
+  );
+
+  if (fromLabel) {
+    const clean = fromLabel.match(/[A-Z0-9][A-Z0-9\-/.]{4,}/i);
+
+    if (clean) {
+      return clean[0];
+    }
+  }
+
+  const patterns = [
+    /\b(?:REF|TRX|FT|QRIS|INV)[A-Z0-9\-/.]{6,}\b/i,
+    /\b\d{10,30}\b/
+  ];
+
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+
+    if (match) {
+      return match[0];
+    }
+  }
+
+  return "-";
+}
+
+function extractTanggalTransaksi(text = "") {
+  const raw = normalizeText(text);
+
+  const bulan =
+    "(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|January|February|March|April|May|June|July|August|September|October|November|December)";
+
+  const patterns = [
+    new RegExp(
+      `\\b\\d{1,2}\\s+${bulan}\\s+\\d{4}(?:\\s+[|,\\-]?\\s*\\d{1,2}[:.]\\d{2}(?::\\d{2})?)?\\b`,
+      "i"
+    ),
+    /\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}(?:\s+[|,\-]?\s*\d{1,2}[:.]\d{2}(?::\d{2})?)?\b/i,
+    /\b\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}(?:\s+[|,\-]?\s*\d{1,2}[:.]\d{2}(?::\d{2})?)?\b/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+
+    if (match) {
+      return match[0].replace(/\s+/g, " ").trim();
+    }
+  }
+
+  const fromLabel = findValueByLabel(
+    text,
+    /(?:tanggal\s*transaksi|tgl\s*transaksi|tanggal|tgl|date|waktu|jam|time)/i
+  );
+
+  if (fromLabel) {
+    return fromLabel
+      .replace(/\s+/g, " ")
+      .replace(/(?:ref|nominal|jumlah|total|amount).*$/i, "")
+      .trim();
+  }
+
+  return "-";
+}
+
+function cleanNominalToNumber(rawNominal = "") {
+  let value = rawNominal.toString().trim();
+
+  value = value.replace(/\s/g, "");
+
+  if (/,00$/.test(value)) {
+    value = value.replace(/,00$/, "");
+  }
+
+  value = value.replace(/[^\d]/g, "");
+
+  const number = Number(value);
+
+  return Number.isFinite(number) ? number : 0;
+}
+
+function formatRupiah(number) {
+  if (!number) return "-";
+
+  return new Intl.NumberFormat("id-ID", {
+    style: "currency",
+    currency: "IDR",
+    maximumFractionDigits: 0
+  }).format(number);
+}
+
+function extractNominal(text = "") {
+  const raw = normalizeText(text);
+
+  const fromLabel = findValueByLabel(
+    text,
+    /(?:nominal|jumlah|total|amount|nilai\s*transaksi|transfer)/i
+  );
+
+  if (fromLabel) {
+    const match = fromLabel.match(/(?:rp|idr)?\s*([0-9][0-9.,]*)/i);
+
+    if (match) {
+      return formatRupiah(cleanNominalToNumber(match[1]));
+    }
+  }
+
+  const patterns = [
+    /(?:nominal|jumlah|total|amount|nilai\s*transaksi|transfer)\s*[:：\-]?\s*(?:rp|idr)?\s*([0-9][0-9.,]*)/i,
+    /(?:rp|idr)\s*([0-9][0-9.,]*)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = raw.match(pattern);
+
+    if (match) {
+      return formatRupiah(cleanNominalToNumber(match[1]));
+    }
+  }
+
+  return "-";
+}
+
+async function preprocessImage(buffer) {
+  return await sharp(buffer)
+    .rotate()
+    .grayscale()
+    .normalize()
+    .sharpen()
+    .png()
+    .toBuffer();
+}
+
+async function readImageText(buffer) {
+  const processedImage = await preprocessImage(buffer);
+  const worker = await getOcrWorker();
+
+  const result = await worker.recognize(processedImage);
+
+  return result.data.text || "";
+}
+
+function getMessageContent(message) {
+  let msg = message?.message;
+
+  if (!msg) return null;
+
+  if (msg.ephemeralMessage) {
+    msg = msg.ephemeralMessage.message;
+  }
+
+  if (msg.viewOnceMessage) {
+    msg = msg.viewOnceMessage.message;
+  }
+
+  if (msg.viewOnceMessageV2) {
+    msg = msg.viewOnceMessageV2.message;
+  }
+
+  if (msg.documentWithCaptionMessage) {
+    msg = msg.documentWithCaptionMessage.message;
+  }
+
+  return msg;
+}
+
+function isImageMessage(content) {
+  if (!content) return false;
+
+  if (content.imageMessage) {
+    return true;
+  }
+
+  if (
+    content.documentMessage &&
+    content.documentMessage.mimetype &&
+    content.documentMessage.mimetype.startsWith("image/")
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+async function handleIncomingImage(sock, message) {
+  const jid = message.key.remoteJid;
+
+  try {
+    await sock.sendMessage(jid, {
+      text: "Bukti transfer diterima. Sedang membaca gambar..."
+    });
+
+    const buffer = await downloadMediaMessage(
+      message,
+      "buffer",
+      {},
+      {
+        logger,
+        reuploadRequest: sock.updateMediaMessage
+      }
+    );
+
+    const ocrText = await readImageText(buffer);
+
+    if (SAVE_DEBUG_OCR) {
+      await fs.mkdir("debug_ocr", {
+        recursive: true
+      });
+
+      const fileName = `debug_ocr/ocr-${Date.now()}.txt`;
+      await fs.writeFile(fileName, ocrText, "utf8");
+    }
+
+    const valid = CheckIDTransfer(VALID_ID, ocrText);
+
+    if (!valid) {
+      await sock.sendMessage(jid, {
+        text: "Bukti Transfer Tidak Valid"
+      });
+
+      return;
+    }
+
+    const refId = extractRefId(ocrText);
+    const tanggalTransaksi = extractTanggalTransaksi(ocrText);
+    const nominal = extractNominal(ocrText);
+
+    const reply = [
+      "*HASIL PEMBACAAN BUKTI TRANSFER*",
+      "",
+      "Status: VALID",
+      `ID Validasi: ${VALID_ID}`,
+      "",
+      `Ref ID: ${refId}`,
+      `Tanggal Transaksi (tgl dan waktu): ${tanggalTransaksi}`,
+      `Nominal: ${nominal}`
+    ].join("\n");
+
+    await sock.sendMessage(jid, {
+      text: reply
+    });
+  } catch (error) {
+    console.error("Gagal membaca bukti transfer:", error);
+
+    await sock.sendMessage(jid, {
+      text:
+        "Gagal membaca bukti transfer. Pastikan gambar jelas, tidak buram, dan berisi teks transaksi."
+    });
+  }
+}
+
+
+/**
+ * Mengambil tanggal transaksi dari teks OCR.
+ *
+ * Contoh input:
+ * "07 Jul 2026 - 16:53:57 WIB"
+ * "21 Mei 2026 - 20:08:36 WIB"
+ *
+ * Output:
+ * "2026-07-07 16:53:57"
+ *
+ * @param {string} ocrText Teks hasil OCR bukti transaksi.
+ * @returns {string|null} Tanggal dalam format YYYY-MM-DD HH:mm:ss.
+ */
+function TglTransaksi(ocrText) {
+    if (typeof ocrText !== "string" || !ocrText.trim()) {
+        return null;
+    }
+
+    const bulanIndonesia = {
+        jan: "01",
+        januari: "01",
+        feb: "02",
+        februari: "02",
+        mar: "03",
+        maret: "03",
+        apr: "04",
+        april: "04",
+        mei: "05",
+        jun: "06",
+        juni: "06",
+        jul: "07",
+        juli: "07",
+        agu: "08",
+        ags: "08",
+        agustus: "08",
+        sep: "09",
+        sept: "09",
+        september: "09",
+        okt: "10",
+        oktober: "10",
+        nov: "11",
+        november: "11",
+        des: "12",
+        desember: "12"
+    };
+
+    const polaTanggal =
+        /(\d{1,2})\s+(Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Ags|Sep(?:t(?:ember)?)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?)\s+(\d{4})\s*[-–—]\s*(\d{1,2}):(\d{2}):(\d{2})(?:\s*WIB)?/i;
+
+    const hasil = ocrText.match(polaTanggal);
+
+    if (!hasil) {
+        return null;
+    }
+
+    const tanggal = hasil[1].padStart(2, "0");
+    const namaBulan = hasil[2].toLowerCase();
+    const tahun = hasil[3];
+    const jam = hasil[4].padStart(2, "0");
+    const menit = hasil[5];
+    const detik = hasil[6];
+
+    const bulan = bulanIndonesia[namaBulan];
+
+    if (!bulan) {
+        return null;
+    }
+
+    return `${tahun}-${bulan}-${tanggal} ${jam}:${menit}:${detik}`;
+}
+
+/**
+ * Mengambil nominal transaksi dari teks OCR.
+ *
+ * Contoh:
+ * "Nominal Rp8.000"   -> 8000
+ * "Nominal Rp40.000"  -> 40000
+ * "Nominal Rp 125.500" -> 125500
+ *
+ * @param {string} ocrText Teks hasil OCR bukti transaksi.
+ * @returns {number|null} Nominal sebagai integer atau null jika tidak ditemukan.
+ */
+function Nominal(ocrText) {
+    if (typeof ocrText !== "string" || !ocrText.trim()) {
+        return null;
+    }
+
+    /*
+     * Mengutamakan angka yang berada setelah kata "Nominal"
+     * agar tidak keliru mengambil nilai "Total".
+     */
+    const polaNominal =
+        /Nominal\s*:?\s*Rp\.?\s*([\d.,]+)/i;
+
+    const hasil = ocrText.match(polaNominal);
+
+    if (!hasil) {
+        return null;
+    }
+
+    /*
+     * Menghapus tanda titik, koma, spasi, dan karakter selain angka.
+     * Contoh: "40.000" menjadi "40000".
+     */
+    const angkaBersih = hasil[1].replace(/\D/g, "");
+
+    if (!angkaBersih) {
+        return null;
+    }
+
+    const nilaiNominal = Number.parseInt(angkaBersih, 10);
+
+    return Number.isSafeInteger(nilaiNominal)
+        ? nilaiNominal
+        : null;
+}
+
+/****** End Transfer QRIS */
+
+
+
 
 async function startBot() {
     const { state, saveCreds } = await useMultiFileAuthState("./auth_multi_device"); 
@@ -573,6 +1054,81 @@ async function startBot() {
                 ///// Keluar
                 return;
             }
+
+            /*************************
+             * Transfer QRIS
+             */
+            if (messageType === "imageMessage") {
+                try {
+                    const buffer = await downloadMediaMessage(msg, "buffer", {}, { logger, reuploadRequest: sock.updateMediaMessage });
+
+                    const ocrText = await readImageText(buffer);
+
+                    // Simpan hasil OCR untuk pemeriksaan/debug
+                    if (SAVE_DEBUG_OCR) {
+                        await fsq.mkdir("debug_ocr", { recursive: true });
+
+                        const fileName = `debug_ocr/ocr-${Date.now()}.txt`;
+                        await fsq.writeFile(fileName, ocrText, "utf8");
+
+                        console.log(`Hasil OCR disimpan di: ${fileName}`);
+                    }
+
+                    // Memeriksa apakah ID transfer ditemukan
+                    const valid = CheckIDTransfer(VALID_ID, ocrText);
+
+                    if (!valid) {
+                        return;
+                    }
+                    sock.sendPresenceUpdate("composing", senderJid);
+
+                    // Mengambil informasi transaksi
+                    const refId = extractRefId(ocrText);
+                    //const tanggalTransaksi = extractTanggalTrnansaksi(ocrText);
+                    const tanggalTransaksi = TglTransaksi(ocrText);
+                    //const nominal = extractNominal(ocrText);
+                    const nominal = Nominal(ocrText);
+                    console.log(senderPartNumber, `nominal: ${nominal}, refId: ${refId}, tanggalTransaksi: ${tanggalTransaksi}`);
+
+                    /*****
+                     * Cek User
+                     */
+                    const recPengguna = await getUser(senderNumber, senderPartNumber, isGroup);
+                    const id_pemain = recPengguna.success ? recPengguna.data[0].id_pemain : null;
+                    
+                    /****
+                     * Cek apakah transaksi sudah pernah dicatat sebelumnya
+                     */
+                    const recTransaksiCek = await getDataRow('*', 'reward', {'ref_id': refId});
+
+                    if (recTransaksiCek.success) {
+                        console.log(`Transaksi dengan Ref ID ${refId} sudah pernah dicatat sebelumnya.`);
+                        await sock.sendMessage(senderJid, { text: `Transaksi sudah pernah dicatat sebelumnya.` });
+                        return;
+                    }
+
+                    const dataTransaksi = {'id_pemain': id_pemain, 'ref_id': refId, 'tgl_transaksi': tanggalTransaksi, 'nominal': nominal, 'kode_transaksi': 1, 'tgl_input': new Date()};
+
+                    const recTransaksi = await insertData('reward', dataTransaksi);
+                    console.log(recTransaksi.message);
+
+                    const recListReward = await getDataRowQuery({
+                            columns: ['id_pemain', 'sum(nominal) as total_reward'],
+                            from: 'reward',
+                            joins: [],
+                            filters: {'id_pemain =': id_pemain},
+                            orderBy: 'id_pemain DESC'
+                    });
+
+                    await sock.sendMessage(senderJid, { text: `Anda telah berdonasi sebesar *${nominal}* dan diberikan _reward_ sebesar *${nominal/10000}* poin. _Total reward_ Anda: *${recListReward.data[0].total_reward/10000}* poin.` });
+
+                } catch (error) {
+                    console.error("Gagal membaca bukti transfer:", error);
+                    await sock.sendMessage(senderJid, { text: `Transaksi gagal diproses. Kirim ulang bukti transfer Anda.` });
+                }
+            }
+            
+            //console.log(`nominal: ${nominal}, refId: ${refId}, tanggalTransaksi: ${tanggalTransaksi}`);
 
             /*************************  
              * Kirim Data Presensi
@@ -1213,7 +1769,7 @@ async function startBot() {
         
                     console.log(`Menu ----> ${menu_bereguduo}, ID Turnamen: ${id_turnamen}, ID Pemain: ${id_pemain}, Peringkat: ${peringkat}, Pool: ${pool}`);
                     if (menu_bereguduo===GMP_GANDA) {
-                        id_turnamen=202514;
+                        id_turnamen=202515;
 
                             // Simpan
                             const data = {'id_pemain': id_pemain, 'id_turnamen': id_turnamen, 'ranking_sebelum': peringkat, 'pool': pool, 'tgl_daftar': tgl_daftar};
@@ -1298,23 +1854,69 @@ async function startBot() {
                             orderBy: 'presensi.id_pemain'
                         });
 
-                        if (!recPresensi.success){
-                            await sock.sendMessage(senderJid, { text: `_*${nama_pemain}* belum pernah presensi._` }); 
+                        const jumlah_presensi = recPresensi.success?recPresensi.data[0].jumlah_hadir:0;
+
+                        /*****
+                         * Cek Jumlah Reward 
+                         */
+                        const filter_reward = {'reward.id_pemain =': id_pemain};
+                        const recListReward = await getDataRowQuery({
+                            columns: [`pemain.nama_pemain`, `sum(reward.nominal) as total_reward`, `reward.id_pemain`],
+                            from: 'reward',
+                            joins: [{ table: 'pemain', on: 'reward.id_pemain = pemain.id_pemain'}],
+                            filters: filter_reward,
+                            orderBy: 'reward.id_pemain DESC' });
+
+                        const total_reward = recListReward.success?recListReward.data[0].total_reward/10000:0;
+                        /***
+                         * Akhir Jumlah Reward
+                         */
+                        
+                        /***
+                         * Cek Juara
+                         */
+                        const recJuara = await getDataRow('*', 'peringkat', {'id_pemain': id_pemain, 'id_turnamen': id_turnamen_prev});
+                        const juara = recJuara.success?recJuara.data[0].juara:0;
+                        /***
+                         * Akhir Cek Juara
+                         */
+                        let potong_reward = 0;
+                        if (jumlah_presensi>=MIN_PRESENSI) {
+                            potong_reward +=2;
+                        } else {
+                            potong_reward = 5 - jumlah_presensi;
+                        }
+                        if (juara>0) potong_reward ++;
+
+                        /***
+                         * Cek Ketersediaan Reward
+                         */
+                        if (total_reward<potong_reward) {
+                            await sock.sendMessage(senderJid, { text: `_Maaf, *${nama_pemain}* tidak dapat mendaftar karena jumlah reward yang tersedia kurang dari ${potong_reward} (total reward saat ini ${total_reward} poin)_` }); 
                             return;
                         }
-                    
-                        if (recPresensi.data[0].jumlah_hadir>=MIN_PRESENSI) {
-
-                            if (menu_bereguduo===GMP_BEREGUDUO) id_turnamen=202513;
+                  
+                        if (menu_bereguduo===GMP_BEREGUDUO) id_turnamen=202513;
                             // Simpan
-                            const data = {'id_pemain': id_pemain, 'id_turnamen': id_turnamen, 'ranking_sebelum': peringkat, 'pool': pool, 'tgl_daftar': tgl_daftar};
-                            console.log(data);
-                            const recDaftar = await insertData('daftar', data);
+                        const data = {'id_pemain': id_pemain, 'id_turnamen': id_turnamen, 'ranking_sebelum': peringkat, 'pool': pool, 'tgl_daftar': tgl_daftar};
+                        console.log(data);
+                        const recDaftar = await insertData('daftar', data);
                             
-                            await sock.sendMessage(senderJid, { text: recDaftar.message });
+                        await sock.sendMessage(senderJid, { text: recDaftar.message });
 
-                            // Tampilkan Data 
-                            const recDaftar1 =  await getDataRowQuery({
+                        /***
+                         * Simpan Pengurangan Reward
+                         */
+                        const dataTransaksi = {'id_pemain': id_pemain, 'ref_id': id_pemain, 'tgl_transaksi': new Date(), 'nominal': -potong_reward * 10000, 'kode_transaksi': 2, 'tgl_input': new Date()};
+
+                        const recTransaksi = await insertData('reward', dataTransaksi);
+                        console.log(recTransaksi.message);
+                        /***
+                         * Akhir Simpan Pengurangan Reward
+                         */
+
+                        // Tampilkan Data 
+                        const recDaftar1 =  await getDataRowQuery({
                                 columns: [
                                 'daftar.id_pemain',
                                 'pemain.nama_pemain',
@@ -1335,10 +1937,10 @@ async function startBot() {
                                 ],
                                 filters: {'turnamen.id_turnamen =': id_turnamen},
                                 orderBy: 'daftar.ranking_sebelum'
-                            });
+                        });
                     
                             // Proses Pembagian Pool
-                            if (menu_bereguduo===GMP_BEREGUDUO) {
+                        if (menu_bereguduo===GMP_BEREGUDUO) {
                                     if (recDaftar1.success) {
                                         //const grup = Math.ceil(recDaftar1.data.length / 3);
                                         //console.log(grup);
@@ -1379,33 +1981,33 @@ async function startBot() {
 
                                 let strDaftar = `DAFTAR PESERTA TURNAMEN\n${recDaftar1.data[0].nama_turnamen}\nTanggal : ${DateToStr(recDaftar1.data[0].tgl_realisasi)}\n\n*No. Nama Peserta  #B/L  Pool*\n`;
                                     
-                                    // Proses Mengurutkan Data Pool
-                                    const dataPool = [];
-                                    recDaftar1.data.forEach ((item, index) => {
+                                // Proses Mengurutkan Data Pool
+                                const dataPool = [];
+                                recDaftar1.data.forEach ((item, index) => {
                                         dataPool[index] = {'nu': (index+1), 'nama_pemain': item.nama_pemain, 'ranking_sebelum': item.ranking_sebelum, 'pool': getPool(grup, (index+1))}
                                     });
 
-                                    // Urutkan
-                                    const sortDaftar = [...dataPool].sort((a, b) => {
+                                // Urutkan
+                                const sortDaftar = [...dataPool].sort((a, b) => {
                                         if (a.pool === b.pool) {
                                             return a.ranking_sebelum - b.ranking_sebelum; // urut poin jika pool sama
                                         }
                                         return a.pool.localeCompare(b.pool); // urut pool
-                                    });
+                                });
 
-                                    let ranking_prev = 0;
-                                    sortDaftar.forEach ((item, index) => {
+                                let ranking_prev = 0;
+                                sortDaftar.forEach ((item, index) => {
                                         if (item.ranking_sebelum===99) ranking_prev=0; else ranking_prev=item.ranking_sebelum;
                                         strDaftar += `${String((index+1)).padStart(3, ' ')}. ${item.nama_pemain} #${String(item.nu)}/${String(ranking_prev)} *${item.pool}*\n`;
                                     });
-                                }
-                                await sock.sendMessage(senderJid, { text: strDaftar });
-                                if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
+                            
+                            await sock.sendMessage(senderJid, { text: strDaftar });
+                            if (grup!==2) await sock.sendMessage(senderJid, {image: {url: `./src/grup/${grup}.jpg`}, caption: 'Babak Lanjutan'});
                             }
-                        } else {
-                            await sock.sendMessage(senderJid, { text: `_Presensi *${recPresensi.data[0].nama_pemain}* berjumlah ${recPresensi.data[0].jumlah_hadir}, jadi *belum memenuhi syarat*._`});
                         }
+                        ///////////////////////
                     }
+                    
                 } else {
                     await sock.sendMessage(senderJid, { text: recPengguna.message });
                 }
@@ -1613,6 +2215,24 @@ async function startBot() {
                 }
 
                 delete userSessions[sender];
+            } else if (menu.toLowerCase()===GMP_LIST_REWARD) {
+                sock.sendPresenceUpdate("composing", senderJid);
+
+                const recListReward = await getDataRowQuery({
+                    columns: [`pemain.nama_pemain`, `sum(reward.nominal) as total_reward`, `reward.id_pemain`],
+                    from: 'reward',
+                    joins: [{ table: 'pemain', on: 'reward.id_pemain = pemain.id_pemain'}],
+                    filters: {},
+                    orderBy: 'reward.id_pemain DESC'
+                });
+
+                let strListReward = `*DAFTAR REWARD*\n\n`;
+                recListReward.data.forEach(item => {
+                    const totalReward = item.total_reward /10000;
+                    strListReward += `${item.nama_pemain} ${totalReward.toLocaleString()} poin\n`;
+                });
+                await sock.sendMessage(senderJid, { text: strListReward });
+                delete userSessions[sender];
             }
 
             // Import Data
@@ -1625,3 +2245,11 @@ async function startBot() {
 }
 
 startBot();
+
+process.on("SIGINT", async () => {
+  if (ocrWorker) {
+    await ocrWorker.terminate();
+  }
+
+  process.exit(0);
+});

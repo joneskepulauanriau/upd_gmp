@@ -613,7 +613,7 @@ const [turnamen] = await connection.execute(
 
     const [peringkat] = await connection.execute(
       `SELECT p.id_pemain, pm.nama_pemain, SUM(p.total_poin) AS total_poin, 
-              COUNT(DISTINCT p.id_turnamen) AS jumlah_turnamen 
+              COUNT(DISTINCT p.id_turnamen) AS jumlah_turnamen
        FROM peringkat p
        JOIN pemain pm ON p.id_pemain = pm.id_pemain
        WHERE p.id_turnamen IN (${daftarTurnamen.map(() => "?").join(",")}) 
