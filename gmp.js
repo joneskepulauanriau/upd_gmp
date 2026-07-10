@@ -11,7 +11,7 @@ const {
 } = require('@whiskeysockets/baileys');
 const pino = require('pino');
 const qrcode = require('qrcode-terminal');
-const sharp = require('sharp');
+const {Jimp, JimpMime} = require('jimp');
 const { createWorker } = require("tesseract.js");
 
 const { Session } = require("inspector/promises");
@@ -506,6 +506,7 @@ function extractNominal(text = "") {
   return "-";
 }
 
+/** 
 async function preprocessImage(buffer) {
   return await sharp(buffer)
     .rotate()
@@ -514,6 +515,17 @@ async function preprocessImage(buffer) {
     .sharpen()
     .png()
     .toBuffer();
+}
+    */
+
+async function preprocessImage(buffer) {
+  const image = await Jimp.read(buffer);
+
+  image.greyscale();
+  image.contrast(0.35);
+  image.normalize();
+
+  return await image.getBuffer(JimpMime.png);
 }
 
 async function readImageText(buffer) {
