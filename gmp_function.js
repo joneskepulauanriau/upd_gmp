@@ -160,6 +160,198 @@ const DateTimeIndonesia = (date, timezone = 'WIB') => {
   return `${day}-${month}-${year} ${hours}:${minutes}:${seconds} ${timezone}`;
 }
 
+function setDatetime(strTglWIB) {
+    if (!strTglWIB) return null;
+
+    console.log(`Parsing tanggal: ${strTglWIB}`);
+    // -------------------------------
+    // Mapping nama bulan
+    // -------------------------------
+    const bulanMap = {
+        jan: "01",
+        januari: "01",
+
+        feb: "02",
+        februari: "02",
+
+        mar: "03",
+        maret: "03",
+
+        apr: "04",
+        april: "04",
+
+        mei: "05",
+
+        jun: "06",
+        juni: "06",
+
+        jul: "07",
+        juli: "07",
+
+        agu: "08",
+        ags: "08",
+        agustus: "08",
+
+        sep: "09",
+        sept: "09",
+        september: "09",
+
+        okt: "10",
+        oktober: "10",
+
+        nov: "11",
+        november: "11",
+
+        des: "12",
+        desember: "12"
+    };
+
+    // -------------------------------
+    // Deteksi timezone
+    // -------------------------------
+    let offset = "+07:00";
+
+    if (/WITA/i.test(strTglWIB))
+        offset = "+08:00";
+    else if (/WIT/i.test(strTglWIB))
+        offset = "+09:00";
+    else if (/WIB/i.test(strTglWIB))
+        offset = "+07:00";
+
+    // -------------------------------
+    // Normalisasi string
+    // -------------------------------
+    const strTgl = strTglWIB
+        .replace(/\./g, " ")
+        .replace(/,/g, " ")
+        .replace(/WIB|WITA|WIT/gi, "")
+        .replace(/\s+/g, " ")
+        .trim();
+
+
+    console.log(`Normalized string: ${strTgl}`);  
+
+    // -------------------------------
+    // Validasi tanggal
+    // -------------------------------
+    function isValidDate(y, m, d) {
+        const dt = new Date(y, m - 1, d);
+
+        return (
+            dt.getFullYear() === Number(y) &&
+            dt.getMonth() === Number(m) - 1 &&
+            dt.getDate() === Number(d)
+        );
+    }
+
+    // -------------------------------
+    // Builder ISO
+    // -------------------------------
+    function buildISO(y, m, d, t) {
+
+        if (!isValidDate(y, m, d))
+            return null;
+
+        const date = new Date(
+            `${y}-${m}-${String(d).padStart(2, "0")}T${t}${offset}`
+        );
+
+        if (isNaN(date.getTime()))
+            return null;
+
+        return date.toISOString();
+    }
+
+    let match;
+
+    // ==================================================
+    // dd/mm/yyyy HH:mm:ss
+    // ==================================================
+    match = strTgl.match(
+        /^(\d{1,2})\/(\d{1,2})\/(\d{4})\s+(\d{1,2}:\d{2}:\d{2})$/
+    );
+
+    if (match) {
+
+        const [, hari, bulan, tahun, waktu] = match;
+
+        return buildISO(
+            tahun,
+            bulan.padStart(2, "0"),
+            hari,
+            waktu.padStart(8, "0")
+        );
+    }
+
+    // ==================================================
+    // dd-mm-yyyy HH:mm:ss
+    // ==================================================
+    match = strTgl.match(
+        /^(\d{1,2})-(\d{1,2})-(\d{4})\s+(\d{1,2}:\d{2}:\d{2})$/
+    );
+
+    if (match) {
+
+        const [, hari, bulan, tahun, waktu] = match;
+
+        return buildISO(
+            tahun,
+            bulan.padStart(2, "0"),
+            hari,
+            waktu.padStart(8, "0")
+        );
+    }
+
+    // ==================================================
+    // dd MMM yyyy HH:mm:ss
+    // dd MMM yyyy - HH:mm:ss
+    // ==================================================
+    match = strTgl.match(
+        /^(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})\s*(?:-\s*)?(\d{1,2}:\d{2}:\d{2})$/
+    );
+
+    if (match) {
+
+        let [, hari, namaBulan, tahun, waktu] = match;
+
+        namaBulan = namaBulan.toLowerCase();
+
+        const bulan = bulanMap[namaBulan];
+
+        if (!bulan)
+            return null;
+
+        return buildISO(
+            tahun,
+            bulan,
+            hari,
+            waktu.padStart(8, "0")
+        );
+    }
+
+    return null;
+}
+
+function getTanggalTransaksi(text = "") {
+  if (!text || typeof text !== "string") return "-";
+  const regex = /^.*?\b(?:\d{1,2}[./-]\d{1,2}[./-]\d{4}|\d{1,2}[ .][A-Za-z]+[ .]\d{4})\s*,?\s*(?:-\s*)?\d{1,2}:\d{2}:\d{2}\s*(?:WIB|WITA|WIT)?.*$/gmi;
+
+  const hasil = text.match(regex) || [];
+  if (hasil.length=== 0) return "-";
+ 
+  return setDatetime(CleanText(hasil[0]));
+}
+
+function CleanText(text = "") {
+return hasil = text
+        .replace(/\./g, " ")
+        .replace(/\s*-\s*/g, " ")
+        .replace(/,/g, "")
+        .replace(/\b(WIB|WITA|WIT)\b.*$/i, "$1")
+        .replace(/\s+/g, " ")
+        .trim();
+}
+
 async function generateImage(recParam, senderNumber) {
   const rowHeight = 25;
   const rowHeightHeader = 220;
@@ -653,5 +845,5 @@ async function posisiLanjutan(jumlah_grup) {
 
 module.exports = {
   handleFile, readFileExcel, DateToWIB, DateToStr, DateTimeIndonesia, generateImage, generateImage2, generateImageReport, parseCommand, parsePerintah, 
-  isNumber, getDayNameFromDate, posisiLanjutan
+  isNumber, getDayNameFromDate, posisiLanjutan, getTanggalTransaksi
 };

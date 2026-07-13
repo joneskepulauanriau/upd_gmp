@@ -20,7 +20,7 @@ const fsq = require("fs/promises");
 
 const { error } = require("console");
 const {getDataRow, getDataRowQuery, insertData, updateData, deleteData, getPeringkat, findHeadToHead, resetAutoincrement, getIDPlayer, getPosisiTerbaik } = require('./src/model/gmp_service');
-const { handleFile, readFileExcel, generateImage, generateImage2, DateToWIB, parseCommand, parsePerintah, isNumber, generateImageReport, DateTimeIndonesia, getDayNameFromDate} = require('./src/model/gmp_function');
+const {handleFile, readFileExcel, generateImage, generateImage2, DateToWIB, parseCommand, parsePerintah, isNumber, generateImageReport, DateTimeIndonesia, getDayNameFromDate, getTanggalTransaksi} = require('./src/model/gmp_function');
 const { isPointInPolygon} = require('geolib');
 const locations = require('./locations.json');
 const { sign } = require("crypto");
@@ -326,21 +326,13 @@ function splitLines(text = "") {
     .filter(Boolean);
 }
 
-/**
- * Fungsi validasi ID transfer.
- *
- * ID 024303044 harus ditulis sebagai string,
- * karena angka 0 di depan dapat hilang jika ditulis sebagai number.
- *
- * Contoh benar:
- * CheckIDTransfer("024303044", ocrText)
- */
 function CheckIDTransfer(idTransfer, text = "") {
   const id = String(idTransfer);
-  const cleanText = normalizeText(text);
+
+  const cleanText =  normalizeText(text).toLowerCase();
   const digitsOnly = normalizeDigits(text);
 
-  return cleanText.includes(id) || digitsOnly.includes(id);
+    return (cleanText.includes(id) || digitsOnly.includes(id)) && cleanText.includes("berhasil");
 }
 
 function findValueByLabel(text = "", labelRegex) {
@@ -378,12 +370,12 @@ function findValueByLabel(text = "", labelRegex) {
   return "";
 }
 
-function extractRefId(text = "") {
+function getRefId(text = "") {
   const raw = normalizeText(text);
 
   const fromLabel = findValueByLabel(
     text,
-    /(?:ref(?:erence)?\s*id|ref\.?\s*id|no\.?\s*ref(?:erensi)?|nomor\s*referensi|id\s*transaksi|nomor\s*transaksi|transaction\s*id|rrn|stan)/i
+    /(?:ref(?:erence)?\s*id|ref\.?\s*id|no\.?\s*ref(?:erensi)?|nomor\s*referensi|id\s*transaksi|nomor\s*transaksi|transaction\s*id|ref|stan)/i
   );
 
   if (fromLabel) {
@@ -409,114 +401,6 @@ function extractRefId(text = "") {
 
   return "-";
 }
-
-function extractTanggalTransaksi(text = "") {
-  const raw = normalizeText(text);
-
-  const bulan =
-    "(?:Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Sep(?:tember)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?|January|February|March|April|May|June|July|August|September|October|November|December)";
-
-  const patterns = [
-    new RegExp(
-      `\\b\\d{1,2}\\s+${bulan}\\s+\\d{4}(?:\\s+[|,\\-]?\\s*\\d{1,2}[:.]\\d{2}(?::\\d{2})?)?\\b`,
-      "i"
-    ),
-    /\b\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}(?:\s+[|,\-]?\s*\d{1,2}[:.]\d{2}(?::\d{2})?)?\b/i,
-    /\b\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2}(?:\s+[|,\-]?\s*\d{1,2}[:.]\d{2}(?::\d{2})?)?\b/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = raw.match(pattern);
-
-    if (match) {
-      return match[0].replace(/\s+/g, " ").trim();
-    }
-  }
-
-  const fromLabel = findValueByLabel(
-    text,
-    /(?:tanggal\s*transaksi|tgl\s*transaksi|tanggal|tgl|date|waktu|jam|time)/i
-  );
-
-  if (fromLabel) {
-    return fromLabel
-      .replace(/\s+/g, " ")
-      .replace(/(?:ref|nominal|jumlah|total|amount).*$/i, "")
-      .trim();
-  }
-
-  return "-";
-}
-
-function cleanNominalToNumber(rawNominal = "") {
-  let value = rawNominal.toString().trim();
-
-  value = value.replace(/\s/g, "");
-
-  if (/,00$/.test(value)) {
-    value = value.replace(/,00$/, "");
-  }
-
-  value = value.replace(/[^\d]/g, "");
-
-  const number = Number(value);
-
-  return Number.isFinite(number) ? number : 0;
-}
-
-function formatRupiah(number) {
-  if (!number) return "-";
-
-  return new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0
-  }).format(number);
-}
-
-function extractNominal(text = "") {
-  const raw = normalizeText(text);
-
-  const fromLabel = findValueByLabel(
-    text,
-    /(?:nominal|jumlah|total|amount|nilai\s*transaksi|transfer)/i
-  );
-
-  if (fromLabel) {
-    const match = fromLabel.match(/(?:rp|idr)?\s*([0-9][0-9.,]*)/i);
-
-    if (match) {
-      return formatRupiah(cleanNominalToNumber(match[1]));
-    }
-  }
-
-  const patterns = [
-    /(?:nominal|jumlah|total|amount|nilai\s*transaksi|transfer)\s*[:：\-]?\s*(?:rp|idr)?\s*([0-9][0-9.,]*)/i,
-    /(?:rp|idr)\s*([0-9][0-9.,]*)/i
-  ];
-
-  for (const pattern of patterns) {
-    const match = raw.match(pattern);
-
-    if (match) {
-      return formatRupiah(cleanNominalToNumber(match[1]));
-    }
-  }
-
-  return "-";
-}
-
-/** 
-async function preprocessImage(buffer) {
-  return await sharp(buffer)
-    .rotate()
-    .grayscale()
-    .normalize()
-    .sharpen()
-    .png()
-    .toBuffer();
-}
-    */
 
 async function preprocessImage(buffer) {
   const image = await Jimp.read(buffer);
@@ -579,189 +463,113 @@ function isImageMessage(content) {
   return false;
 }
 
-async function handleIncomingImage(sock, message) {
-  const jid = message.key.remoteJid;
+//// Baru
+function getNominal(text = "") {
+  if (!text || typeof text !== "string") return 0;
 
-  try {
-    await sock.sendMessage(jid, {
-      text: "Bukti transfer diterima. Sedang membaca gambar..."
-    });
+  const lines = normalizeOcrLines(text);
 
-    const buffer = await downloadMediaMessage(
-      message,
-      "buffer",
-      {},
-      {
-        logger,
-        reuploadRequest: sock.updateMediaMessage
-      }
-    );
+  // 1. Cari nominal berdasarkan label
+  // Contoh:
+  // Nominal Rp10.000
+  // Total Rp10.000
+  // Jumlah Rp100.000
+  const labelRegex =
+    /(?:nominal|total|jumlah|amount|nilai\s*transaksi|jumlah\s*pembayaran)/i;
 
-    const ocrText = await readImageText(buffer);
+  for (const line of lines) {
+    if (!labelRegex.test(line)) continue;
 
-    if (SAVE_DEBUG_OCR) {
-      await fs.mkdir("debug_ocr", {
-        recursive: true
-      });
+    const nominal = extractNominalFromText(line);
 
-      const fileName = `debug_ocr/ocr-${Date.now()}.txt`;
-      await fs.writeFile(fileName, ocrText, "utf8");
+    if (nominal > 0) {
+      return nominal;
     }
-
-    const valid = CheckIDTransfer(VALID_ID, ocrText);
-
-    if (!valid) {
-      await sock.sendMessage(jid, {
-        text: "Bukti Transfer Tidak Valid"
-      });
-
-      return;
-    }
-
-    const refId = extractRefId(ocrText);
-    const tanggalTransaksi = extractTanggalTransaksi(ocrText);
-    const nominal = extractNominal(ocrText);
-
-    const reply = [
-      "*HASIL PEMBACAAN BUKTI TRANSFER*",
-      "",
-      "Status: VALID",
-      `ID Validasi: ${VALID_ID}`,
-      "",
-      `Ref ID: ${refId}`,
-      `Tanggal Transaksi (tgl dan waktu): ${tanggalTransaksi}`,
-      `Nominal: ${nominal}`
-    ].join("\n");
-
-    await sock.sendMessage(jid, {
-      text: reply
-    });
-  } catch (error) {
-    console.error("Gagal membaca bukti transfer:", error);
-
-    await sock.sendMessage(jid, {
-      text:
-        "Gagal membaca bukti transfer. Pastikan gambar jelas, tidak buram, dan berisi teks transaksi."
-    });
   }
+
+  // 2. Cari nilai yang memiliki awalan Rp atau IDR
+  // Contoh:
+  // Rp100.000,00
+  // Rp 100.000
+  // IDR 100.000
+  for (const line of lines) {
+    const nominal = extractNominalFromText(line);
+
+    if (nominal > 0) {
+      return nominal;
+    }
+  }
+
+  // 3. Jika OCR menjadi satu paragraf
+  const paragraph = lines.join(" ");
+  const nominal = extractNominalFromText(paragraph);
+
+  if (nominal > 0) {
+    return nominal;
+  }
+
+  return 0;
 }
 
-
-/**
- * Mengambil tanggal transaksi dari teks OCR.
- *
- * Contoh input:
- * "07 Jul 2026 - 16:53:57 WIB"
- * "21 Mei 2026 - 20:08:36 WIB"
- *
- * Output:
- * "2026-07-07 16:53:57"
- *
- * @param {string} ocrText Teks hasil OCR bukti transaksi.
- * @returns {string|null} Tanggal dalam format YYYY-MM-DD HH:mm:ss.
- */
-function TglTransaksi(ocrText) {
-    if (typeof ocrText !== "string" || !ocrText.trim()) {
-        return null;
-    }
-
-    const bulanIndonesia = {
-        jan: "01",
-        januari: "01",
-        feb: "02",
-        februari: "02",
-        mar: "03",
-        maret: "03",
-        apr: "04",
-        april: "04",
-        mei: "05",
-        jun: "06",
-        juni: "06",
-        jul: "07",
-        juli: "07",
-        agu: "08",
-        ags: "08",
-        agustus: "08",
-        sep: "09",
-        sept: "09",
-        september: "09",
-        okt: "10",
-        oktober: "10",
-        nov: "11",
-        november: "11",
-        des: "12",
-        desember: "12"
-    };
-
-    const polaTanggal =
-        /(\d{1,2})\s+(Jan(?:uari)?|Feb(?:ruari)?|Mar(?:et)?|Apr(?:il)?|Mei|Jun(?:i)?|Jul(?:i)?|Agu(?:stus)?|Ags|Sep(?:t(?:ember)?)?|Okt(?:ober)?|Nov(?:ember)?|Des(?:ember)?)\s+(\d{4})\s*[-–—]\s*(\d{1,2}):(\d{2}):(\d{2})(?:\s*WIB)?/i;
-
-    const hasil = ocrText.match(polaTanggal);
-
-    if (!hasil) {
-        return null;
-    }
-
-    const tanggal = hasil[1].padStart(2, "0");
-    const namaBulan = hasil[2].toLowerCase();
-    const tahun = hasil[3];
-    const jam = hasil[4].padStart(2, "0");
-    const menit = hasil[5];
-    const detik = hasil[6];
-
-    const bulan = bulanIndonesia[namaBulan];
-
-    if (!bulan) {
-        return null;
-    }
-
-    return `${tahun}-${bulan}-${tanggal} ${jam}:${menit}:${detik}`;
+function normalizeOcrLines(text = "") {
+  return text
+    .replace(/\r/g, "\n")
+    .replace(/[：]/g, ":")
+    .replace(/[|]/g, "I")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .split("\n")
+    .map(line =>
+      line
+        .replace(/\s+/g, " ")
+        .replace(/\s+:/g, ":")
+        .trim()
+    )
+    .filter(Boolean);
 }
 
-/**
- * Mengambil nominal transaksi dari teks OCR.
- *
- * Contoh:
- * "Nominal Rp8.000"   -> 8000
- * "Nominal Rp40.000"  -> 40000
- * "Nominal Rp 125.500" -> 125500
- *
- * @param {string} ocrText Teks hasil OCR bukti transaksi.
- * @returns {number|null} Nominal sebagai integer atau null jika tidak ditemukan.
- */
-function Nominal(ocrText) {
-    if (typeof ocrText !== "string" || !ocrText.trim()) {
-        return null;
+function extractNominalFromText(text = "") {
+  if (!text) return 0;
+
+  const patterns = [
+    // Rp100.000,00
+    // Rp 100.000
+    // RP100000
+    // IDR 100.000
+    /(?:rp|idr)\s*([0-9][0-9.,]*)/i,
+
+    // Nominal: 100.000
+    // Total: 100.000
+    /(?:nominal|total|jumlah|amount|nilai\s*transaksi)\s*[:\-]?\s*([0-9][0-9.,]*)/i
+  ];
+
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+
+    if (match) {
+      return cleanNominalToInteger(match[1]);
     }
+  }
 
-    /*
-     * Mengutamakan angka yang berada setelah kata "Nominal"
-     * agar tidak keliru mengambil nilai "Total".
-     */
-    const polaNominal =
-        /Nominal\s*:?\s*Rp\.?\s*([\d.,]+)/i;
+  return 0;
+}
 
-    const hasil = ocrText.match(polaNominal);
+function cleanNominalToInteger(value = "") {
+  let nominal = String(value).trim();
 
-    if (!hasil) {
-        return null;
-    }
+  // Hilangkan spasi
+  nominal = nominal.replace(/\s/g, "");
 
-    /*
-     * Menghapus tanda titik, koma, spasi, dan karakter selain angka.
-     * Contoh: "40.000" menjadi "40000".
-     */
-    const angkaBersih = hasil[1].replace(/\D/g, "");
+  // Jika format Indonesia: 100.000,00
+  // Hilangkan ,00
+  nominal = nominal.replace(/,00$/i, "");
 
-    if (!angkaBersih) {
-        return null;
-    }
+  // Hilangkan semua selain angka
+  nominal = nominal.replace(/[^\d]/g, "");
 
-    const nilaiNominal = Number.parseInt(angkaBersih, 10);
+  const result = Number(nominal);
 
-    return Number.isSafeInteger(nilaiNominal)
-        ? nilaiNominal
-        : null;
+  return Number.isFinite(result) ? result : 0;
 }
 
 /****** End Transfer QRIS */
@@ -838,8 +646,6 @@ async function startBot() {
         const statapp = getKeywordsById(IDAPPSTART);
         console.log(statapp);
         //return;
-
-
 
         if (senderNumber === authorizingUser) {
             
@@ -1095,11 +901,15 @@ async function startBot() {
                     sock.sendPresenceUpdate("composing", senderJid);
 
                     // Mengambil informasi transaksi
-                    const refId = extractRefId(ocrText);
+                    const refId = getRefId(ocrText);
+                    //const refId = getRefID(ocrText);
                     //const tanggalTransaksi = extractTanggalTrnansaksi(ocrText);
-                    const tanggalTransaksi = TglTransaksi(ocrText);
+                    //const tanggalTransaksi = TglTransaksi(ocrText);
+                    const tanggalTransaksi =  getTanggalTransaksi(ocrText);
+                    console.log('XXXXXXXXXXXXXXXXXXXXXXXXxx',getTanggalTransaksi(ocrText));
                     //const nominal = extractNominal(ocrText);
-                    const nominal = Nominal(ocrText);
+                    //const nominal = Nominal(ocrText);
+                    const nominal = getNominal(ocrText);
                     console.log(senderPartNumber, `nominal: ${nominal}, refId: ${refId}, tanggalTransaksi: ${tanggalTransaksi}`);
 
                     /*****
@@ -2235,7 +2045,7 @@ async function startBot() {
                     from: 'reward',
                     joins: [{ table: 'pemain', on: 'reward.id_pemain = pemain.id_pemain'}],
                     filters: {},
-                    orderBy: 'reward.id_pemain DESC'
+                    groupBy: 'reward.id_pemain'
                 });
 
                 let strListReward = `*DAFTAR REWARD*\n\n`;
