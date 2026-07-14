@@ -902,15 +902,9 @@ async function startBot() {
 
                     // Mengambil informasi transaksi
                     const refId = getRefId(ocrText);
-                    //const refId = getRefID(ocrText);
-                    //const tanggalTransaksi = extractTanggalTrnansaksi(ocrText);
-                    //const tanggalTransaksi = TglTransaksi(ocrText);
                     const tanggalTransaksi =  getTanggalTransaksi(ocrText);
-                    console.log('XXXXXXXXXXXXXXXXXXXXXXXXxx',getTanggalTransaksi(ocrText));
-                    //const nominal = extractNominal(ocrText);
-                    //const nominal = Nominal(ocrText);
                     const nominal = getNominal(ocrText);
-                    console.log(senderPartNumber, `nominal: ${nominal}, refId: ${refId}, tanggalTransaksi: ${tanggalTransaksi}`);
+                    console.log(`senderJid: ${senderJid}, senderPartNumber: ${senderPartNumber}, nominal: ${nominal}, refId: ${refId}, tanggalTransaksi: ${tanggalTransaksi}`);
 
                     /*****
                      * Cek User
@@ -939,7 +933,7 @@ async function startBot() {
                             from: 'reward',
                             joins: [],
                             filters: {'id_pemain =': id_pemain},
-                            orderBy: 'id_pemain DESC'
+                            groupBy: 'id_pemain'
                     });
 
                     await sock.sendMessage(senderJid, { text: `Anda telah berdonasi sebesar *${nominal}* dan diberikan _reward_ sebesar *${nominal/10000}* poin. _Total reward_ Anda: *${recListReward.data[0].total_reward/10000}* poin.` });
@@ -1687,7 +1681,7 @@ async function startBot() {
                             from: 'reward',
                             joins: [{ table: 'pemain', on: 'reward.id_pemain = pemain.id_pemain'}],
                             filters: filter_reward,
-                            orderBy: 'reward.id_pemain DESC' });
+                            groupBy: 'reward.id_pemain' });
 
                         const total_reward = recListReward.success?recListReward.data[0].total_reward/10000:0;
                         /***
@@ -1729,7 +1723,8 @@ async function startBot() {
                         /***
                          * Simpan Pengurangan Reward
                          */
-                        const dataTransaksi = {'id_pemain': id_pemain, 'ref_id': id_pemain, 'tgl_transaksi': new Date(), 'nominal': -potong_reward * 10000, 'kode_transaksi': 2, 'tgl_input': new Date()};
+                        const refid_trans = `${id_turnamen}${id_pemain}`;
+                        const dataTransaksi = {'id_pemain': id_pemain, 'ref_id': refid_trans, 'tgl_transaksi': new Date(), 'nominal': -potong_reward * 10000, 'kode_transaksi': 2, 'tgl_input': new Date()};
 
                         const recTransaksi = await insertData('reward', dataTransaksi);
                         console.log(recTransaksi.message);
