@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- Host: 127.0.0.1
--- Generation Time: Aug 01, 2026 at 04:09 PM
+-- Generation Time: Aug 02, 2026 at 04:24 PM
 -- Server version: 10.1.38-MariaDB
 -- PHP Version: 7.2.17
 
@@ -42,10 +42,10 @@ CREATE TABLE `saldo` (
 --
 
 INSERT INTO `saldo` (`id_transaksi`, `tgl_transaksi`, `uraian`, `jumlah`, `kode_transaksi`) VALUES
-(1, '2026-12-02 00:00:00', 'Donasi Atas Nama Muhammad Yunus', 100000, 'D'),
-(2, '2026-12-02 00:00:00', 'Donasi Atas Nama Dharma', 100000, 'D'),
-(3, '2026-12-04 00:00:00', 'Donasi Atas Nama Chandra', 20000, 'D'),
-(4, '2026-12-05 00:00:00', 'Token Listrik 50.000', 50000, 'K');
+(1, '2026-07-10 17:17:13', 'Donasi an. Muhammad Yunus', 100000, 'D'),
+(2, '2026-07-10 19:31:41', 'Donasi an. Syahri D. Putra', 100000, 'D'),
+(3, '2026-07-14 13:07:51', 'Donasi an. Chandra', 20000, 'D'),
+(4, '2026-08-01 20:30:00', 'Token Listrik', 50000, 'K');
 
 --
 -- Indexes for dumped tables
